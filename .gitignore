@@ -14,3 +14,10 @@ Thumbs.db
 # Project-specific
 data/demo_contracts.json
 .env
+.env.*
+!.env.example
+.python-version
+.node-version
+node_modules/
+dist/
+build/
