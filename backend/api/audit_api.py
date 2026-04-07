@@ -2,7 +2,8 @@
 Audit Trail API Endpoints
 """
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
+from backend.governance.rbac import Permission, requires_permission
 from backend.infrastructure.audit_logger import AuditLogger
 from backend.infrastructure.error_tracker import ErrorTracker
 from typing import Optional
@@ -13,7 +14,7 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/audit", tags=["audit"])
 
-@router.get("/trail/{resource_id}")
+@router.get("/trail/{resource_id}", dependencies=[Depends(requires_permission(Permission.VIEW_AUDIT))])
 async def get_audit_trail(
     resource_id: str,
     limit: int = Query(default=100, ge=1, le=1000)
@@ -33,7 +34,7 @@ async def get_audit_trail(
         logger.error(f"Failed to get audit trail: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/errors/statistics")
+@router.get("/errors/statistics", dependencies=[Depends(requires_permission(Permission.VIEW_REPORTS))])
 async def get_error_statistics(
     hours: int = Query(default=24, ge=1, le=168)
 ):
@@ -51,7 +52,7 @@ async def get_error_statistics(
         logger.error(f"Failed to get error statistics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/errors/recent")
+@router.get("/errors/recent", dependencies=[Depends(requires_permission(Permission.VIEW_REPORTS))])
 async def get_recent_errors(
     limit: int = Query(default=50, ge=1, le=500)
 ):

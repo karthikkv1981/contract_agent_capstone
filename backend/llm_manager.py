@@ -3,6 +3,9 @@ from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_anthropic import ChatAnthropic
 from langchain_mistralai import ChatMistralAI
+from backend.shared.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 from backend.contract_chat_agent import get_agent
 
@@ -48,7 +51,7 @@ class LLMManager:
                     model="mistral-large-latest",
                 )
             )
-        print(f"Loaded {len(self.agents)} llms.")
+        logger.info(f"Loaded {len(self.agents)} llms.")
 
     def get_model_by_name(self, name: str):
         try:

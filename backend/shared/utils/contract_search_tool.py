@@ -77,6 +77,7 @@ class Location(BaseModel):
 
 def get_contracts(
     embeddings: Any,
+    tenant_id: str,
     min_effective_date: Optional[str] = None,
     max_effective_date: Optional[str] = None,
     min_end_date: Optional[str] = None,
@@ -89,8 +90,8 @@ def get_contracts(
     monetary_value: Optional[MonetaryValue] = None,
     governing_law: Optional[Location] = None
 ):  
-    params: dict[str, Any] = {}
-    filters: list[str] = []
+    params: dict[str, Any] = {"tenant_id": tenant_id}
+    filters: list[str] = ["c.tenant_id = $tenant_id"]
     cypher_statement = "MATCH (c:Contract) "
 
     if governing_law:
@@ -99,146 +100,88 @@ def get_contracts(
             """EXISTS {
                 MATCH (c)-[:HAS_GOVERNING_LAW]->(country)
                 WHERE toLower(country.country) = $governing_law_country
-            }"""
-            )
+            }""")
             params["governing_law_country"] = governing_law.country.lower()
 
-    # Total amount
     if monetary_value:
         filters.append(f"c.total_amount {monetary_value.operator.value} $total_value")
         params["total_value"] = monetary_value.value
 
-    # Effective date range
     if min_effective_date:
         filters.append("c.effective_date >= date($min_effective_date)")
         params["min_effective_date"] = min_effective_date
+
     if max_effective_date:
         filters.append("c.effective_date <= date($max_effective_date)")
         params["max_effective_date"] = max_effective_date
 
-    # End date range
     if min_end_date:
         filters.append("c.end_date >= date($min_end_date)")
         params["min_end_date"] = min_end_date
+
     if max_end_date:
         filters.append("c.end_date <= date($max_end_date)")
         params["max_end_date"] = max_end_date
 
-    # Contract type - HYBRID APPROACH: Exact + Semantic
     if contract_type:
-        # First try exact matching with abbreviation mapping
-        type_mappings = {
-            "MSA": ["MSA", "Master Services Agreement"],
-            "SOW": ["SOW", "Statement of Work"], 
-            "NDA": ["NDA", "MNDA", "Non-Disclosure Agreement"],
-            "DPA": ["DPA", "Data Processing Agreement"],
-            "Master Services Agreement": ["MSA", "Master Services Agreement"],
-            "Statement of Work": ["SOW", "Statement of Work"],
-            "Non-Disclosure Agreement": ["NDA", "MNDA", "Non-Disclosure Agreement"]
-        }
-        
-        possible_types = type_mappings.get(contract_type, [contract_type])
-        
-        if len(possible_types) > 1:
-            type_conditions = []
-            for i, ptype in enumerate(possible_types):
-                param_name = f"contract_type_{i}"
-                type_conditions.append(f"c.contract_type = ${param_name}")
-                params[param_name] = ptype
-            filters.append(f"({' OR '.join(type_conditions)})")
-        else:
-            # If no exact mapping, use semantic search on summary
-            search_terms = [
-                f"{contract_type} contract",
-                f"{contract_type} agreement", 
-                contract_type
-            ]
-            
-            # Create comprehensive search query
-            semantic_query = " ".join(search_terms)
-            params["type_embedding"] = embeddings.embed_query(semantic_query)
-            
-            # Use semantic search as fallback
-            cypher_statement += """
-            WITH c, vector.similarity.cosine(c.embedding, $type_embedding) AS type_score
-            WHERE type_score > 0.75
-            """
+        filters.append("c.contract_type = $contract_type")
+        params["contract_type"] = contract_type
 
-    # Parties (relationship-based filter)
     if parties:
-        parties_filter = []
-        for i, party in enumerate(parties):
-            party_param_name = f"party_{i}"
-            parties_filter.append(
-                f"""EXISTS {{
-                MATCH (c)<-[:PARTY_TO]-(party)
-                WHERE toLower(party.name) CONTAINS ${party_param_name}
-            }}"""
-            )
-            params[party_param_name] = party.lower()
+        filters.append("""ANY(party_name IN $parties WHERE EXISTS {
+            MATCH (c)<-[:PARTY_TO]-(p:Party)
+            WHERE p.name = party_name
+        })""")
+        params["parties"] = parties
 
-        if parties_filter:
-            filters.append(" AND ".join(parties_filter))
-    
     if active is not None:
         operator = ">=" if active else "<"
         filters.append(f"c.end_date {operator} date()")
-    
-    # Apply remaining filters
+
     if filters:
-        if contract_type and contract_type not in type_mappings and len(type_mappings.get(contract_type, [contract_type])) == 1:
-            # Semantic search case
-            cypher_statement += f"AND {' AND '.join(filters)} "
-        else:
-            cypher_statement += f"WHERE {' AND '.join(filters)} "
-    
-    # Summary search
+        cypher_statement += f"WHERE {' AND '.join(filters)} "
+
     if summary_search:
         summary_embedding = embeddings.embed_query(summary_search)
         params["summary_embedding"] = summary_embedding
         
-        if contract_type and contract_type not in type_mappings:
-            # Combine type and summary semantic search
+        # Determine search type based on query tokens
+        query_tokens = summary_search.upper().split()
+        exact_match_type = next((t for t in query_tokens if t in CONTRACT_TYPES), None)
+        
+        if exact_match_type:
+            # Boost exact type matches
             cypher_statement += """
-            WITH c, type_score, vector.similarity.cosine(c.embedding, $summary_embedding) AS summary_score
-            WITH c, (type_score + summary_score) / 2 AS combined_score
-            WHERE combined_score > 0.8
-            ORDER BY combined_score DESC
+            WITH c, vector.similarity.cosine(c.embedding, $summary_embedding) AS doc_score
+            WHERE c.contract_type = $exact_type OR doc_score > 0.8
+            ORDER BY c.contract_type = $exact_type DESC, doc_score DESC
             """
+            params["exact_type"] = exact_match_type
         else:
-            # Just summary search
+            # Pure semantic search
             cypher_statement += """
-            WITH c, vector.similarity.cosine(c.embedding, $summary_embedding) AS summary_score
-            WHERE summary_score > 0.9
-            ORDER BY summary_score DESC
+            WITH c, vector.similarity.cosine(c.embedding, $summary_embedding) AS doc_score
+            WHERE doc_score > 0.8
+            ORDER BY doc_score DESC
             """
-    elif contract_type and contract_type not in type_mappings:
-        # Just semantic type search
-        cypher_statement += "ORDER BY type_score DESC "
-    else:
-        # No semantic search, sort by date
-        cypher_statement += "WITH c ORDER BY c.effective_date DESC "
 
     if cypher_aggregation:
-        cypher_statement += """WITH c, c.summary AS summary, c.contract_type AS contract_type,
-          c.contract_scope AS contract_scope, c.effective_date AS effective_date, c.end_date AS end_date,
-          [(c)<-[r:PARTY_TO]-(party) | {name: party.name, role: r.role}] AS parties, c.end_date >= date() AS active, c.total_amount as monetary_value, c.file_id AS contract_id,
-          apoc.coll.toSet([(c)<-[:PARTY_TO]-(party)-[:LOCATED_IN]->(country) | country.name]) AS countries """
-        cypher_statement += cypher_aggregation
+        cypher_statement += f"\n {cypher_aggregation}"
     else:
-        # Final RETURN
-        cypher_statement += """WITH collect(c) AS nodes
+        cypher_statement += """
         RETURN {
-            total_count_of_contracts: size(nodes),
-            example_values: [
-              el in nodes[..5] |
-              {summary:el.summary, contract_type:el.contract_type, contract_scope: el.contract_scope,
-               file_id: el.file_id, effective_date: el.effective_date, end_date: el.end_date,monetary_value: el.total_amount,
-               contract_id: el.file_id, parties: [(el)<-[r:PARTY_TO]-(party) | {name: party.name, role: r.role}],
-               countries: apoc.coll.toSet([(el)<-[:PARTY_TO]-()-[:LOCATED_IN]->(country) | country.name])}
-            ]
-        } AS output"""
-    
+            total_count: count(c),
+            contracts: collect({
+                file_id: c.file_id,
+                summary: c.summary,
+                contract_type: c.contract_type,
+                effective_date: c.effective_date,
+                end_date: c.end_date,
+                parties: [(c)<-[r:PARTY_TO]-(party) | {name: party.name, role: r.role}]
+            })[..10]
+        } AS result
+        """
+
     output = graph.query(cypher_statement, params)
     return [convert_neo4j_date(el) for el in output]
 
@@ -256,14 +199,12 @@ class ContractInput(BaseModel):
     max_end_date: Optional[str] = Field(
         None, description="Latest contract end date (YYYY-MM-DD)"
     )
-    contract_type: Optional[str] = Field(
-        None, description="Contract type - supports both exact matching (MSA, SOW, NDA) and semantic search for other types"
-    )
+    contract_type: Optional[str] = Field(None, description="Contract type")
     parties: Optional[List[str]] = Field(
         None, description="List of parties involved in the contract"
     )
     summary_search: Optional[str] = Field(
-        None, description="Semantic search of contract content and summary"
+        None, description="Semantic search of contract content"
     )
     active: Optional[bool] = Field(None, description="Whether the contract is active")
     governing_law: Optional[Location] = Field(None, description="Governing law of the contract")
@@ -274,6 +215,7 @@ class ContractInput(BaseModel):
         None,
         description="""Custom Cypher statement for advanced aggregations and analytics.""",
     )
+    tenant_id: str = Field(..., description="The ID of the tenant requesting the search")
 
 
 class ContractSearchTool(BaseTool):
@@ -285,6 +227,7 @@ class ContractSearchTool(BaseTool):
 
     def _run(
         self,
+        tenant_id: str,
         min_effective_date: Optional[str] = None,
         max_effective_date: Optional[str] = None,
         min_end_date: Optional[str] = None,
@@ -300,6 +243,7 @@ class ContractSearchTool(BaseTool):
         """Use the tool."""
         return get_contracts(
             embedding,
+            tenant_id,
             min_effective_date,
             max_effective_date,
             min_end_date,

@@ -1,6 +1,7 @@
 """API endpoints for AI patterns functionality."""
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from backend.governance.rbac import Permission, requires_permission
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
 
@@ -28,7 +29,7 @@ class PatternResponse(BaseModel):
     error: Optional[str] = None
 
 
-@router.post("/analyze", response_model=PatternResponse)
+@router.post("/analyze", response_model=PatternResponse, dependencies=[Depends(requires_permission(Permission.ANALYZE))])
 async def analyze_with_patterns(request: PatternRequest):
     """Analyze contract using specified AI patterns."""
     try:
@@ -67,7 +68,7 @@ async def analyze_with_patterns(request: PatternRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/react", response_model=Dict[str, Any])
+@router.post("/react", response_model=Dict[str, Any], dependencies=[Depends(requires_permission(Permission.ANALYZE))])
 async def react_analysis(request: PatternRequest):
     """Perform ReACT pattern analysis only."""
     try:
@@ -87,7 +88,7 @@ async def react_analysis(request: PatternRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/chain-of-thought", response_model=Dict[str, Any])
+@router.post("/chain-of-thought", response_model=Dict[str, Any], dependencies=[Depends(requires_permission(Permission.ANALYZE))])
 async def chain_of_thought_analysis(request: PatternRequest):
     """Perform Chain-of-Thought pattern analysis only."""
     try:
@@ -110,7 +111,7 @@ async def chain_of_thought_analysis(request: PatternRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/advanced-rag", response_model=Dict[str, Any])
+@router.post("/advanced-rag", response_model=Dict[str, Any], dependencies=[Depends(requires_permission(Permission.ANALYZE))])
 async def advanced_rag_analysis(request: PatternRequest):
     """Perform Advanced RAG pattern analysis only."""
     try:

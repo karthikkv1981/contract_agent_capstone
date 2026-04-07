@@ -1,6 +1,7 @@
 """Policy management API extending existing patterns."""
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends
+from backend.governance.rbac import Permission, requires_permission
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 
@@ -27,7 +28,7 @@ class PolicySearchRequest(BaseModel):
     limit: int = 10
 
 
-@router.post("/upload")
+@router.post("/upload", dependencies=[Depends(requires_permission(Permission.MANAGE_POLICIES))])
 async def upload_policy_document(
     file: UploadFile = File(...),
     tenant_id: str = Form(...),
@@ -62,7 +63,7 @@ async def upload_policy_document(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/tenant/{tenant_id}")
+@router.get("/tenant/{tenant_id}", dependencies=[Depends(requires_permission(Permission.VIEW_REPORTS))])
 async def get_tenant_policies(tenant_id: str):
     """Get all policies for a tenant using cache."""
     try:
@@ -110,7 +111,7 @@ async def get_tenant_policies(tenant_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{policy_id}")
+@router.get("/{policy_id}", dependencies=[Depends(requires_permission(Permission.VIEW_REPORTS))])
 async def get_policy_details(policy_id: str):
     """Get detailed policy information."""
     try:
@@ -146,7 +147,7 @@ async def get_policy_details(policy_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/compliance/check")
+@router.post("/compliance/check", dependencies=[Depends(requires_permission(Permission.ANALYZE))])
 async def check_policy_compliance(request: PolicyComplianceRequest):
     """Check contract compliance against policies using existing agent."""
     try:
@@ -179,7 +180,7 @@ async def check_policy_compliance(request: PolicyComplianceRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/search")
+@router.post("/search", dependencies=[Depends(requires_permission(Permission.ANALYZE))])
 async def search_policies(request: PolicySearchRequest):
     """Search policies using semantic similarity."""
     try:
@@ -230,7 +231,7 @@ async def get_applicable_policies(tenant_id: str, contract_type: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/{policy_id}")
+@router.delete("/{policy_id}", dependencies=[Depends(requires_permission(Permission.MANAGE_POLICIES))])
 async def delete_policy(policy_id: str):
     """Soft delete policy."""
     try:

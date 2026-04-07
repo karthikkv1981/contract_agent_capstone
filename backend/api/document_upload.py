@@ -1,4 +1,5 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks, Query, Depends, Request
+from backend.governance.rbac import Permission, requires_permission
 from fastapi.responses import StreamingResponse
 from backend.application.services.document_processing_service import DocumentServiceFactory
 from backend.domain.entities import DocumentProcessingRequest
@@ -24,7 +25,7 @@ router = APIRouter(prefix="/api/documents", tags=["documents"])
 def get_llm_manager(request: Request):
     return request.app.state.llm_manager
 
-@router.get("/debug/contracts")
+@router.get("/debug/contracts", dependencies=[Depends(requires_permission(Permission.VIEW_AUDIT))])
 async def debug_contracts():
     """Debug endpoint to see all contracts"""
     try:
@@ -60,7 +61,7 @@ async def debug_contracts():
         logger.error(f"Debug contracts failed: {e}")
         return {"error": str(e)}
 
-@router.get("/debug/contract-types")
+@router.get("/debug/contract-types", dependencies=[Depends(requires_permission(Permission.VIEW_REPORTS))])
 async def debug_contract_types():
     """Debug endpoint to see contract type distribution"""
     try:
@@ -83,11 +84,12 @@ async def debug_contract_types():
         logger.error(f"Debug contract types failed: {e}")
         return {"error": str(e)}
 
-@router.post("/upload")
+@router.post("/upload", dependencies=[Depends(requires_permission(Permission.UPLOAD))])
 @audit_log(AuditEventType.DOCUMENT_UPLOAD, "upload_pdf")
 async def upload_pdf(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    tenant_id: str = Query(default="default-tenant", description="Tenant ID for data isolation"),
     model: str = Query(default="gemini-2.5-flash", description="LLM model to use for processing"),
     enable_enhanced: bool = Query(default=False, description="Enable enhanced processing with sections/clauses"),
     llm_mgr: LLMManager = Depends(get_llm_manager)
@@ -288,6 +290,7 @@ async def upload_pdf(
                 processing_request = DocumentProcessingRequest(
                     file_path=temp_path,
                     filename=file.filename,
+                    tenant_id=tenant_id,
                     processing_options={
                         "model": model, 
                         "full_text": full_text,
@@ -398,9 +401,10 @@ async def upload_pdf(
         finally:
             logger.info(f"=== UPLOAD END: {file.filename if file else 'unknown'} ===")
 
-@router.post("/upload-stream")
+@router.post("/upload-stream", dependencies=[Depends(requires_permission(Permission.UPLOAD))])
 async def upload_pdf_stream(
     file: UploadFile = File(...),
+    tenant_id: str = Query(default="default-tenant", description="Tenant ID for data isolation"),
     model: str = Query(default="gemini-2.5-flash", description="LLM model to use for processing"),
     llm_mgr: LLMManager = Depends(get_llm_manager)
 ):
@@ -429,6 +433,7 @@ async def upload_pdf_stream(
         processing_request = DocumentProcessingRequest(
             file_path=temp_path,
             filename=file.filename,
+            tenant_id=tenant_id,
             processing_options={"model": model}
         )
         

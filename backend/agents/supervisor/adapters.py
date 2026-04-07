@@ -11,7 +11,8 @@ class PDFProcessingAdapter(BaseAgentAdapter):
     def prepare_input(self, context: AgentContext) -> Dict[str, Any]:
         return {
             "file_path": context.input_data.get("file_path"),
-            "filename": context.input_data.get("filename", "")
+            "filename": context.input_data.get("filename", ""),
+            "tenant_id": context.input_data.get("tenant_id", "default-tenant")
         }
     
     def call_agent(self, input_data: Dict[str, Any]) -> Any:
@@ -23,6 +24,7 @@ class PDFProcessingAdapter(BaseAgentAdapter):
         request = DocumentProcessingRequest(
             file_path=input_data["file_path"],
             filename=input_data["filename"],
+            tenant_id=input_data.get("tenant_id", "default-tenant"),
             processing_options={"model": "gemini-2.5-flash"}
         )
         

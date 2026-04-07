@@ -7,6 +7,7 @@ from datetime import datetime
 class DocumentProcessingRequest:
     file_path: str
     filename: str
+    tenant_id: str
     user_id: Optional[str] = None
     processing_options: Dict[str, Any] = None
 
@@ -17,6 +18,7 @@ class ContractExtractionResult:
     validation_errors: List[str]
     requires_human_review: bool
     extracted_text: str = ""
+    tenant_id: str = ""
 
 # Domain interfaces (Interface Segregation Principle)
 class ITextExtractor(ABC):
@@ -31,7 +33,11 @@ class IContractAnalyzer(ABC):
 
 class IContractRepository(ABC):
     @abstractmethod
-    async def store_contract(self, contract_data: Dict[str, Any]) -> str:
+    async def store_contract(self, contract_data: Dict[str, Any], tenant_id: str) -> str:
+        pass
+    
+    @abstractmethod
+    async def get_contract_by_id(self, contract_id: str, tenant_id: str) -> Dict[str, Any]:
         pass
 
 class IDocumentProcessor(ABC):

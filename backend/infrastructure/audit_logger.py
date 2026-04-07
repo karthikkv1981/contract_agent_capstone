@@ -25,6 +25,11 @@ class AuditEventType(Enum):
     EMBEDDING_GENERATION = "embedding_generation"
     VALIDATION_FAILURE = "validation_failure"
     PROCESSING_ERROR = "processing_error"
+    SECURITY_VIOLATION = "security_violation"
+    AGENT_TOOL_CALL = "agent_tool_call"
+    AGENT_THOUGHT = "agent_thought"
+    MODEL_GUARD_CHECK = "model_guard_check"
+    USER_INTERACTION = "user_interaction"
 
 class AuditLogger:
     """Centralized audit logging with Neo4j persistence"""

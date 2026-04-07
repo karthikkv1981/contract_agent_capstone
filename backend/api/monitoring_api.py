@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
+from backend.governance.rbac import Permission, requires_permission
 from typing import Dict, List, Any, Optional
 import logging
 from backend.shared.monitoring.performance_monitor import monitor
@@ -11,7 +12,7 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/monitoring", tags=["monitoring"])
 
-@router.get("/performance")
+@router.get("/performance", dependencies=[Depends(requires_permission(Permission.VIEW_REPORTS))])
 async def get_performance_metrics():
     """Get real-time performance metrics"""
     try:
@@ -33,7 +34,7 @@ async def get_performance_metrics():
         logger.error(f"Failed to get performance metrics: {e}")
         raise HTTPException(status_code=500, detail=f"Metrics retrieval failed: {str(e)}")
 
-@router.get("/performance/{operation}")
+@router.get("/performance/{operation}", dependencies=[Depends(requires_permission(Permission.VIEW_REPORTS))])
 async def get_operation_performance(operation: str, hours: int = 1):
     """Get performance metrics for specific operation"""
     try:
@@ -99,7 +100,7 @@ async def health_check():
             "error": str(e)
         }
 
-@router.post("/batch-process")
+@router.post("/batch-process", dependencies=[Depends(requires_permission(Permission.ANALYZE))])
 async def batch_process_contracts(
     background_tasks: BackgroundTasks,
     contracts: List[Dict[str, Any]]
@@ -144,7 +145,7 @@ async def process_batch_background(contracts: List[Dict[str, Any]]):
     except Exception as e:
         logger.error(f"Background batch processing failed: {e}")
 
-@router.get("/alerts")
+@router.get("/alerts", dependencies=[Depends(requires_permission(Permission.VIEW_REPORTS))])
 async def get_performance_alerts():
     """Get recent performance alerts"""
     try:
@@ -183,7 +184,7 @@ async def get_performance_alerts():
         logger.error(f"Failed to get performance alerts: {e}")
         raise HTTPException(status_code=500, detail=f"Alerts retrieval failed: {str(e)}")
 
-@router.post("/cache/clear")
+@router.post("/cache/clear", dependencies=[Depends(requires_permission(Permission.MANAGE_POLICIES))])
 async def clear_cache(pattern: Optional[str] = None):
     """Clear cache entries"""
     try:
@@ -202,7 +203,7 @@ async def clear_cache(pattern: Optional[str] = None):
         logger.error(f"Cache clear failed: {e}")
         raise HTTPException(status_code=500, detail=f"Cache clear failed: {str(e)}")
 
-@router.get("/system-info")
+@router.get("/system-info", dependencies=[Depends(requires_permission(Permission.VIEW_REPORTS))])
 async def get_system_info():
     """Get system information and configuration"""
     try:

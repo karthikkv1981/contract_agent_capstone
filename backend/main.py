@@ -19,6 +19,10 @@ from backend.api.enhanced_document_upload import router as enhanced_upload_route
 from backend.agents.agent_workflow_tracker import get_current_workflow_status
 from backend.shared.middleware.tracing import TracingMiddleware
 from backend.shared.utils.logger import get_logger, correlation_id_var
+from backend.governance.prompt_guard import PromptGuard
+from backend.governance.output_guard import OutputGuard
+from backend.governance.rbac import Permission, requires_permission
+from backend.infrastructure.audit_logger import AuditLogger
 
 logger = get_logger(__name__)
 
@@ -98,12 +102,12 @@ app.include_router(policy_router)
 debug_router = create_debug_router()
 conditionally_include_router(app, debug_router, is_development())
 
-@app.get("/api/workflow/status")
+@app.get("/api/workflow/status", dependencies=[Depends(requires_permission(Permission.VIEW_REPORTS))])
 async def get_workflow_status():
     """Get current multi-agent workflow status for executive dashboard"""
     return get_current_workflow_status()
 
-@app.get("/api/planning/status")
+@app.get("/api/planning/status", dependencies=[Depends(requires_permission(Permission.VIEW_REPORTS))])
 async def get_planning_status():
     """Get autonomous planning agent status"""
     from backend.agents.planning.planning_agent import PlanningAgentFactory
@@ -153,9 +157,38 @@ def rebuild_history(history):
     return messages
 
 
-async def runner(model: str, prompt: str, history: str, llm_mgr: LLMManager):
-    logger.info(f"Processing LLM request for model '{model}'")
+async def runner(model: str, prompt: str, history: str, llm_mgr: LLMManager, user_role: str = "unknown"):
+    logger.info(f"Processing LLM request for model '{model}' for user_role '{user_role}'")
     
+    # Initialize AuditLogger and AgentAuditService for Guard persistence
+    from backend.infrastructure.agent_audit_service import AgentAuditService
+    
+    audit_logger = AuditLogger()
+    agent_audit = AgentAuditService(audit_logger)
+    session_id = correlation_id_var.get() or "unknown_session"
+    context_metadata = {"user_role": user_role}
+    
+    # 0. Log User Interaction
+    agent_audit.log_user_interaction(user_id="user", prompt=prompt, session_id=session_id)
+
+    # 1. Prompt Guard Pre-Check
+    guard = PromptGuard(audit_logger=audit_logger)
+    guard_result = guard.validate(prompt, context_metadata=context_metadata)
+    
+    # Log Prompt Guard Check
+    agent_audit.log_guard_check(
+        guard_name="Prompt Guard",
+        is_safe=guard_result.is_safe,
+        violation_type=guard_result.violation_type,
+        session_id=session_id
+    )
+
+    if not guard_result.is_safe:
+        logger.error(f"Prompt blocked by Guard: {guard_result.violation_type}")
+        yield f"data: {json.dumps({'content': guard_result.message, 'type': 'error'})}\n\n"
+        yield f"data: {json.dumps({'content': '', 'type': 'end'})}\n\n"
+        return
+
     # history comes in from FE as stringified list of dumped model messages
     if history != "[]":
         previous_messages = rebuild_history(history)
@@ -174,13 +207,12 @@ async def runner(model: str, prompt: str, history: str, llm_mgr: LLMManager):
         stream_mode=["messages", "updates"]
     )
 
-    # for demo purposes only:
-    # - we are passing inmemory context as history around because we don't want to handle a db in this demo
-    # - "updates" stream_mode returns AIMessage instead of AIMessageChunk which is less data to pass around than chunk models
-    # - context is passed to FE and back on each /run/ endpoint call so AI is aware of the previous messages
-    # - we are not storing context on server in order we don't kill all of it's memory - in production you would store it in a db
+    # Context management
     context = json.loads(history)
     context.append(prompt_message.model_dump_json())
+    
+    # Buffer for post-check
+    ai_full_content = ""
 
     async for message in messages:
         if message[0] == "messages":
@@ -211,12 +243,67 @@ async def runner(model: str, prompt: str, history: str, llm_mgr: LLMManager):
                         context.append(tool_message.model_dump_json())
                     else:
                         context.append(json.dumps(tool_message))
+        
+        # Capture AI content for post-check
+        if message[0] == "messages":
+            chunk = message[1][0]
+            if isinstance(chunk, AIMessageChunk):
+                ai_full_content += chunk.content
+
+    # 2. Llama Guard Post-Check
+    # Extract source context from tool results for hallucination check
+    tool_contents = []
+    for msg_str in context:
+        try:
+            msg = json.loads(msg_str)
+            if msg.get("type") == "tool":
+                tool_contents.append(msg.get("content", ""))
+        except Exception:
+            pass
+    
+    if tool_contents:
+        context_metadata["source_text"] = "\n---\n".join(tool_contents)
+
+    output_guard = OutputGuard(audit_logger=audit_logger)
+    post_check_result = output_guard.validate(ai_full_content, context_metadata=context_metadata)
+    
+    # Log Output Guard Check
+    agent_audit.log_guard_check(
+        guard_name="Output Guard",
+        is_safe=post_check_result.is_safe,
+        violation_type=post_check_result.violation_type,
+        session_id=session_id
+    )
+
+    if not post_check_result.is_safe:
+        logger.error(f"Output blocked by Llama Guard: {post_check_result.violation_type}")
+        # Notify user about the violation even if part of the content was streamed
+        yield f"data: {json.dumps({'content': ' [CONTENT REMOVED DUE TO SAFETY POLICY] ' + post_check_result.message, 'type': 'error'})}\n\n"
+    else:
+        # If PII was redacted, we should update the context
+        redacted_content = post_check_result.metadata.get("redacted_content")
+        if redacted_content and redacted_content != ai_full_content:
+            logger.info("PII redaction applied to AI output")
+            # Log PII redaction to audit trail
+            audit_logger.log_event(
+                event_type=AuditEventType.SECURITY_VIOLATION,
+                resource_id=session_id,
+                action="pii_redaction",
+                metadata={"status": "redacted"}
+            )
+            # Update the last message in context with the redacted version
+            for i in range(len(context) - 1, -1, -1):
+                msg_data = json.loads(context[i])
+                if msg_data.get("type") == "ai":
+                    msg_data["content"] = redacted_content
+                    context[i] = json.dumps(msg_data)
+                    break
 
     yield f"data: {json.dumps({'content': context, 'type': 'history'})}\n\n"
     yield f"data: {json.dumps({'content': '', 'type': 'end'})}\n\n"
 
 
-@app.post("/api/run/")
+@app.post("/api/run/", dependencies=[Depends(requires_permission(Permission.ANALYZE))])
 async def run(payload: RunPayload, llm_mgr: LLMManager = Depends(get_llm_manager)):
     return StreamingResponse(
         runner(model=payload.model, prompt=payload.prompt, history=payload.history, llm_mgr=llm_mgr),

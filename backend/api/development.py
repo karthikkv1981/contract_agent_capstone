@@ -1,4 +1,5 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from backend.governance.rbac import Permission, requires_permission
 import logging
 
 from backend.shared.utils.logger import get_logger
@@ -7,7 +8,7 @@ logger = get_logger(__name__)
 # Development-only router
 router = APIRouter(prefix="/dev", tags=["development"])
 
-@router.get("/debug/contracts")
+@router.get("/debug/contracts", dependencies=[Depends(requires_permission(Permission.VIEW_AUDIT))])
 async def debug_contracts():
     """Debug endpoint to see all contracts - DEVELOPMENT ONLY"""
     try:
@@ -43,7 +44,7 @@ async def debug_contracts():
         logger.error(f"Debug contracts failed: {e}")
         return {"error": str(e)}
 
-@router.get("/debug/contract-types")
+@router.get("/debug/contract-types", dependencies=[Depends(requires_permission(Permission.VIEW_REPORTS))])
 async def debug_contract_types():
     """Debug endpoint to see contract type distribution - DEVELOPMENT ONLY"""
     try:

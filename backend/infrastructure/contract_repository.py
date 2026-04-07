@@ -16,11 +16,11 @@ class Neo4jContractRepository(IContractRepository):
         self.graph = graph  # Reuse existing connection
         self.embedding_service = embedding  # Reuse existing embedding service
     
-    def get_contract_by_id(self, contract_id: str) -> Dict[str, Any]:
-        """Get contract data by ID"""
+    async def get_contract_by_id(self, contract_id: str, tenant_id: str) -> Dict[str, Any]:
+        """Get contract data by ID with tenant isolation"""
         try:
             query = """
-            MATCH (c:Contract {file_id: $contract_id})
+            MATCH (c:Contract {file_id: $contract_id, tenant_id: $tenant_id})
             OPTIONAL MATCH (c)<-[r:PARTY_TO]-(p:Party)
             RETURN c.file_id as file_id,
                    c.contract_type as contract_type,
@@ -33,7 +33,7 @@ class Neo4jContractRepository(IContractRepository):
                    collect({name: p.name, role: r.role}) as parties
             """
             
-            result = self.graph.query(query, {"contract_id": contract_id})
+            result = self.graph.query(query, {"contract_id": contract_id, "tenant_id": tenant_id})
             
             if result:
                 contract_data = result[0]
@@ -55,8 +55,8 @@ class Neo4jContractRepository(IContractRepository):
             logger.error(f"Failed to get contract {contract_id}: {e}")
             return None
     
-    def store_contract(self, contract_data: Dict[str, Any]) -> str:
-        """Store contract in Neo4j using existing schema"""
+    async def store_contract(self, contract_data: Dict[str, Any], tenant_id: str) -> str:
+        """Store contract in Neo4j with tenant isolation"""
         
         try:
             # Generate unique contract ID
@@ -81,10 +81,10 @@ class Neo4jContractRepository(IContractRepository):
                 except Exception as e:
                     logger.warning(f"Failed to generate embedding: {e}")
             
-            # Create contract node using existing schema
             contract_query = """
             CREATE (c:Contract {
                 file_id: $file_id,
+                tenant_id: $tenant_id,
                 summary: $summary,
                 contract_type: $contract_type,
                 contract_scope: $contract_scope,
@@ -101,6 +101,7 @@ class Neo4jContractRepository(IContractRepository):
             
             contract_params = {
                 "file_id": contract_id,
+                "tenant_id": tenant_id,
                 "summary": contract_data.get("summary", ""),
                 "contract_type": contract_data.get("contract_type", "Unknown"),
                 "contract_scope": ", ".join(contract_data.get("key_terms", [])),
@@ -125,13 +126,13 @@ class Neo4jContractRepository(IContractRepository):
             # Create party relationships
             parties = contract_data.get("parties", [])
             logger.info(f"Creating {len(parties)} party relationships")
-            self._create_party_relationships(created_contract_id, parties)
+            self._create_party_relationships(created_contract_id, tenant_id, parties)
             
             # Create governing law relationship
             governing_law = contract_data.get("governing_law")
             if governing_law:
                 logger.info(f"Creating governing law relationship: {governing_law}")
-                self._create_governing_law_relationship(created_contract_id, governing_law)
+                self._create_governing_law_relationship(created_contract_id, tenant_id, governing_law)
             
             logger.info(f"=== CONTRACT STORED SUCCESSFULLY: {created_contract_id} ===")
             return created_contract_id
@@ -142,21 +143,22 @@ class Neo4jContractRepository(IContractRepository):
             logger.error(f"Full traceback: {traceback.format_exc()}")
             raise
     
-    def _create_party_relationships(self, contract_id: str, parties: list):
-        """Create party nodes and relationships"""
+    def _create_party_relationships(self, contract_id: str, tenant_id: str, parties: list):
+        """Create party nodes and relationships with tenant context"""
         
         for party_data in parties:
             if not party_data.get("name"):
                 continue
                 
             party_query = """
-            MATCH (c:Contract {file_id: $contract_id})
+            MATCH (c:Contract {file_id: $contract_id, tenant_id: $tenant_id})
             MERGE (p:Party {name: $party_name})
             MERGE (p)-[:PARTY_TO {role: $role}]->(c)
             """
             
             party_params = {
                 "contract_id": contract_id,
+                "tenant_id": tenant_id,
                 "party_name": party_data["name"],
                 "role": party_data.get("role", "Unknown")
             }
@@ -164,17 +166,18 @@ class Neo4jContractRepository(IContractRepository):
             self.graph.query(party_query, party_params)
             logger.info(f"Created party relationship: {party_data['name']}")
     
-    def _create_governing_law_relationship(self, contract_id: str, governing_law: str):
-        """Create governing law relationship"""
+    def _create_governing_law_relationship(self, contract_id: str, tenant_id: str, governing_law: str):
+        """Create governing law relationship with tenant context"""
         
         gov_law_query = """
-        MATCH (c:Contract {file_id: $contract_id})
+        MATCH (c:Contract {file_id: $contract_id, tenant_id: $tenant_id})
         MERGE (country:Country {name: $country_name})
         MERGE (c)-[:HAS_GOVERNING_LAW]->(country)
         """
         
         gov_law_params = {
             "contract_id": contract_id,
+            "tenant_id": tenant_id,
             "country_name": governing_law
         }
         

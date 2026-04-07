@@ -1,4 +1,5 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, Query, Depends, Request
+from backend.governance.rbac import Permission, requires_permission
 from backend.application.services.enhanced_document_processing_service import EnhancedDocumentServiceFactory
 from backend.domain.entities import DocumentProcessingRequest
 from backend.llm_manager import LLMManager
@@ -17,9 +18,10 @@ router = APIRouter(prefix="/api/documents/enhanced", tags=["enhanced-documents"]
 def get_llm_manager(request: Request):
     return request.app.state.llm_manager
 
-@router.post("/upload")
+@router.post("/upload", dependencies=[Depends(requires_permission(Permission.UPLOAD))])
 async def upload_pdf_enhanced(
     file: UploadFile = File(...),
+    tenant_id: str = Query(default="default-tenant", description="Tenant ID for data isolation"),
     model: str = Query(default="gemini-2.5-flash", description="LLM model to use for processing"),
     enable_embeddings: bool = Query(default=True, description="Enable multi-level embeddings processing"),
     llm_mgr: LLMManager = Depends(get_llm_manager)
@@ -106,6 +108,7 @@ async def upload_pdf_enhanced(
             processing_request = DocumentProcessingRequest(
                 file_path=temp_path,
                 filename=file.filename,
+                tenant_id=tenant_id,
                 processing_options={
                     "model": model, 
                     "full_text": full_text,

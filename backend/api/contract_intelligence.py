@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks, Depends, Request
+from backend.governance.rbac import Permission, requires_permission
 from fastapi.responses import StreamingResponse
 from backend.application.services.contract_intelligence_service import ContractIntelligenceServiceFactory
 from backend.llm_manager import LLMManager
@@ -20,7 +21,7 @@ repository = Neo4jContractRepository()
 def get_llm_manager(request: Request):
     return request.app.state.llm_manager
 
-@router.post("/contracts/{contract_id}/analyze")
+@router.post("/contracts/{contract_id}/analyze", dependencies=[Depends(requires_permission(Permission.ANALYZE))])
 async def analyze_contract_intelligence(
     contract_id: str,
     model: str = Query(default="gemini-2.5-flash", description="LLM model to use for analysis"),
@@ -152,7 +153,7 @@ async def get_intelligence_status(contract_id: str):
         logger.error(f"Failed to get intelligence status for {contract_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Status check failed: {str(e)}")
 
-@router.post("/contracts/batch-analyze")
+@router.post("/contracts/batch-analyze", dependencies=[Depends(requires_permission(Permission.ANALYZE))])
 async def batch_analyze_contracts(
     background_tasks: BackgroundTasks,
     contract_ids: list[str],
@@ -191,7 +192,7 @@ async def batch_analyze_contracts(
         logger.error(f"Batch analysis failed: {e}")
         raise HTTPException(status_code=500, detail=f"Batch analysis failed: {str(e)}")
 
-@router.get("/dashboard/summary")
+@router.get("/dashboard/summary", dependencies=[Depends(requires_permission(Permission.VIEW_REPORTS))])
 async def get_intelligence_dashboard():
     """Get summary statistics for intelligence dashboard"""
     

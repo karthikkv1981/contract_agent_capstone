@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends, Request
+from backend.governance.rbac import Permission, requires_permission
 from typing import Dict, Any
 from ..agents.supervisor.supervisor_agent import SupervisorFactory, WorkflowRequest
 from ..llm_manager import LLMManager
@@ -11,7 +12,7 @@ router = APIRouter(prefix="/api/supervisor", tags=["supervisor"])
 def get_llm_manager(request: Request):
     return request.app.state.llm_manager
 
-@router.post("/workflow/execute")
+@router.post("/workflow/execute", dependencies=[Depends(requires_permission(Permission.ANALYZE))])
 async def execute_workflow(
     workflow_data: Dict[str, Any],
     llm_mgr: LLMManager = Depends(get_llm_manager)
