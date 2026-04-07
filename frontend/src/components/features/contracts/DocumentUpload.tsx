@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { Button } from '../../shared/ui/button';
 import { Card } from '../../shared/ui/card';
 import { Loader } from '../../shared/ui/loader';
+import { apiRequest } from '../../../services/apiClient';
 
 interface DocumentUploadProps {
   onUploadComplete?: (result: UploadResult) => void;
@@ -51,11 +52,8 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({
     // Start polling for workflow status
     const pollWorkflow = setInterval(async () => {
       try {
-        const workflowResponse = await fetch('/api/workflow/status');
-        if (workflowResponse.ok) {
-          const workflowData = await workflowResponse.json();
-          onWorkflowUpdate?.(workflowData);
-        }
+        const workflowData = await apiRequest<any>('/api/workflow/status');
+        onWorkflowUpdate?.(workflowData);
       } catch (e) {
         // Ignore workflow polling errors
       }
@@ -66,27 +64,11 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({
       formData.append('file', file);
       formData.append('model', modelSelection);
 
-      const response = await fetch('/api/documents/upload', {
+      const result = await apiRequest<UploadResult>('/api/documents/upload', {
         method: 'POST',
         body: formData
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        // removed console error
-        throw new Error(`Upload failed: ${response.status} - ${errorText}`);
-      }
-
-      const responseText = await response.text();
-      // removed console log
-
-      let result: UploadResult;
-      try {
-        result = JSON.parse(responseText);
-      } catch (parseError) {
-        // removed console error
-        throw new Error(`Invalid response format: ${responseText.substring(0, 100)}`);
-      }
       setUploadResult(result);
 
       if (onUploadComplete) {
@@ -96,22 +78,18 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({
       // Final workflow status update
       setTimeout(async () => {
         try {
-          const workflowResponse = await fetch('/api/workflow/status');
-          if (workflowResponse.ok) {
-            const workflowData = await workflowResponse.json();
-            onWorkflowUpdate?.(workflowData);
-          }
+          const workflowData = await apiRequest<any>('/api/workflow/status');
+          onWorkflowUpdate?.(workflowData);
         } catch (e) {
           // Ignore final workflow polling error
         }
       }, 1000);
 
-    } catch (error) {
-      // removed console error
+    } catch (error: any) {
       setUploadResult({
         filename: file.name,
         status: 'error',
-        details: error instanceof Error ? error.message : 'Upload failed',
+        details: error instanceof Error ? error.message : error.data?.detail || 'Upload failed',
         model_used: modelSelection
       });
     } finally {

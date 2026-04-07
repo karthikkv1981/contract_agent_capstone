@@ -1,16 +1,14 @@
 import logging
 import json
-import contextvars
 from datetime import datetime
 from typing import Optional
 
-# ContextVar to store the correlation ID for the current async flow
-correlation_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("correlation_id", default="")
+from backend.shared.utils.context_vars import correlation_id_var, user_id_var, username_var
 
 class JsonFormatter(logging.Formatter):
     """
-    A unified standard JSON formatter that automatically injects the active correlation_id
-    from contextvars, adhering to structured logging best practices.
+    A unified standard JSON formatter that automatically injects the active correlation_id, 
+    user_id, and username from contextvars, adhering to structured logging best practices.
     """
     def format(self, record: logging.LogRecord) -> str:
         log_record = {
@@ -23,6 +21,14 @@ class JsonFormatter(logging.Formatter):
         correlation_id = correlation_id_var.get()
         if correlation_id:
             log_record["correlation_id"] = correlation_id
+            
+        username = username_var.get()
+        if username:
+            log_record["username"] = username
+            
+        user_id = user_id_var.get()
+        if user_id:
+            log_record["user_id"] = user_id
             
         if record.exc_info:
             log_record["exception"] = self.formatException(record.exc_info)
