@@ -10,6 +10,14 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY-}
       - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:6006/v1/traces
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://pguser:pgpassword@postgres:5432/contract_intel}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-CHANGE_ME_IN_PRODUCTION_32_CHARS_MIN}
+      - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
+      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-60}
+      - ADMIN_DEFAULT_PASSWORD=${ADMIN_DEFAULT_PASSWORD:-Admin@1234!}
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks:
       - net
     x-develop:
@@ -38,6 +46,26 @@ services:
       - 4317:4317
     networks:
       - net
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: pguser
+      POSTGRES_PASSWORD: pgpassword
+      POSTGRES_DB: contract_intel
+    ports:
+      - 5432:5432
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pguser -d contract_intel"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
 networks:
   net:
+
+volumes:
+  pgdata:

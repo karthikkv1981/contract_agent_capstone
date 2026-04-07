@@ -21,5 +21,5 @@ ENV PYTHONPATH=/app
 
 EXPOSE 8000
 
-# Run the application from the backend directory
-CMD ["uv", "run", "fastapi", "dev", "backend/main.py", "--host", "0.0.0.0", "--port", "8000"]
+# Run migrations then start the application
+CMD ["sh", "-c", "cd backend && uv run alembic upgrade head && cd .. && uv run fastapi dev backend/main.py --host 0.0.0.0 --port 8000"]

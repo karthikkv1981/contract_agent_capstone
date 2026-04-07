@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../shared/ui/card';
 import { Badge } from '../../shared/ui/badge';
 import { Clock, Brain, XCircle, FileText, AlertTriangle, Shield, Wifi, RefreshCw } from 'lucide-react';
 import { DetailModal } from './DetailModal';
+import { apiRequest } from '../../../services/apiClient';
 import { ClausesDetail } from './ClausesDetail';
 import { ViolationsDetail } from './ViolationsDetail';
 import { RiskDetail } from './RiskDetail';
@@ -63,35 +64,19 @@ export const ContractIntelligence: React.FC<ContractIntelligenceProps> = ({
     setError(null);
     setNetworkError(false);
     
-    // Start polling for workflow status
     const pollWorkflow = setInterval(async () => {
       try {
-        const workflowResponse = await fetch('/api/workflow/status');
-        if (workflowResponse.ok) {
-          const workflowData = await workflowResponse.json();
-          onWorkflowUpdate?.(workflowData);
-        }
+        const workflowData = await apiRequest<any>('/api/workflow/status');
+        onWorkflowUpdate?.(workflowData);
       } catch (e) {
         // Ignore workflow polling errors
       }
     }, 500);
     
     try {
-      const response = await fetch(`/api/intelligence/contracts/${contractId}/analyze?model=${model}`, {
+      const data = await apiRequest<any>(`/api/intelligence/contracts/${contractId}/analyze?model=${model}`, {
         method: 'POST',
       });
-      
-      if (!response.ok) {
-        if (response.status === 404) {
-          throw new Error('Contract not found. Please verify the contract ID.');
-        }
-        if (response.status >= 500) {
-          throw new Error('Server error. Please try again later.');
-        }
-        throw new Error(`Analysis failed: ${response.statusText}`);
-      }
-      
-      const data = await response.json();
       
       if (!data.results) {
         throw new Error('No analysis results returned. The contract may be invalid or corrupted.');
@@ -107,16 +92,13 @@ export const ContractIntelligence: React.FC<ContractIntelligenceProps> = ({
       // Final workflow status update
       setTimeout(async () => {
         try {
-          const workflowResponse = await fetch('/api/workflow/status');
-          if (workflowResponse.ok) {
-            const workflowData = await workflowResponse.json();
-            onWorkflowUpdate?.(workflowData);
-          }
+          const workflowData = await apiRequest<any>('/api/workflow/status');
+          onWorkflowUpdate?.(workflowData);
         } catch (e) {
           // Ignore final workflow polling error
         }
       }, 1000);
-    } catch (err) {
+    } catch (err: any) {
       if (err instanceof TypeError && err.message.includes('fetch')) {
         setNetworkError(true);
         setError('Network connection failed. Please check your internet connection.');
