@@ -312,7 +312,9 @@ async def upload_pdf(
                     # Use enhanced processor with sections/clauses
                     from backend.factories.document_processor_factory import DocumentProcessorFactory
                     processor = DocumentProcessorFactory.create_processor("full", llm_mgr.agents[model])
-                    result = processor.process_document(temp_path, processing_request.processing_options)
+                    # Ensure tenant_id is passed in options
+                    processing_request.processing_options["tenant_id"] = tenant_id
+                    result = await processor.process_document(temp_path, processing_request.processing_options)
                     
                     # Convert to expected format
                     if result["status"] == "success":
@@ -324,7 +326,7 @@ async def upload_pdf(
                 else:
                     # Use existing basic processing
                     document_service = DocumentServiceFactory.create_service(llm_mgr)
-                    result = document_service.process_pdf_upload(processing_request)
+                    result = await document_service.process_pdf_upload(processing_request)
                 
                 logger.info(f"Document processing completed successfully: {result}")
             except Exception as proc_error:
@@ -465,8 +467,18 @@ async def upload_pdf_stream(
                 
                 messages = [processing_message]
                 
+                # Create initial state for streaming
+                initial_state = {
+                    "file_path": temp_path,
+                    "tenant_id": tenant_id,
+                    "messages": messages,
+                    "extracted_text": None,
+                    "contract_data": None,
+                    "processing_result": None
+                }
+                
                 # Stream results (same pattern as existing system)
-                async for chunk in pdf_agent.astream({"messages": messages}, stream_mode=["messages", "updates"]):
+                async for chunk in pdf_agent.astream(initial_state, stream_mode=["messages", "updates"]):
                     if chunk[0] == "messages":
                         message = chunk[1]
                         if hasattr(message[0], 'tool_calls') and len(message[0].tool_calls) > 0:

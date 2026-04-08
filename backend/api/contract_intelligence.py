@@ -24,6 +24,7 @@ def get_llm_manager(request: Request):
 @router.post("/contracts/{contract_id}/analyze", dependencies=[Depends(requires_permission(Permission.ANALYZE))])
 async def analyze_contract_intelligence(
     contract_id: str,
+    tenant_id: str = Query(default="default-tenant", description="Tenant ID for data isolation"),
     model: str = Query(default="gemini-2.5-flash", description="LLM model to use for analysis"),
     use_planning: bool = Query(default=True, description="Use autonomous planning agent"),
     llm_mgr: LLMManager = Depends(get_llm_manager)
@@ -43,7 +44,7 @@ async def analyze_contract_intelligence(
         intelligence_service = ContractIntelligenceServiceFactory.create_service(llm_mgr)
         
         # Perform multi-agent analysis with optional planning
-        intelligence = intelligence_service.analyze_contract_by_id(contract_id, model, use_planning)
+        intelligence = await intelligence_service.analyze_contract_by_id(contract_id, tenant_id, model, use_planning)
         
         if not intelligence:
             raise HTTPException(status_code=404, detail=f"Contract {contract_id} not found or has no content")
@@ -117,7 +118,7 @@ async def get_intelligence_status(contract_id: str):
     try:
         # Query contract intelligence status
         query = """
-        MATCH (c:Contract {file_id: $contract_id})
+        MATCH (c:Contract {file_id: $contract_id, tenant_id: $tenant_id})
         RETURN c.intelligence_status as status,
                c.risk_score as risk_score,
                c.risk_level as risk_level,
@@ -128,7 +129,7 @@ async def get_intelligence_status(contract_id: str):
                c.intelligence_updated as updated
         """
         
-        result = repository.graph.query(query, {"contract_id": contract_id})
+        result = repository.graph.query(query, {"contract_id": contract_id, "tenant_id": "default-tenant"})
         
         if not result:
             raise HTTPException(status_code=404, detail=f"Contract {contract_id} not found")
@@ -157,7 +158,9 @@ async def get_intelligence_status(contract_id: str):
 async def batch_analyze_contracts(
     background_tasks: BackgroundTasks,
     contract_ids: list[str],
-    model: str = Query(default="gemini-2.5-flash", description="LLM model to use for analysis")
+    tenant_id: str = Query(default="default-tenant", description="Tenant ID for data isolation"),
+    model: str = Query(default="gemini-2.5-flash", description="LLM model to use for analysis"),
+    llm_mgr: LLMManager = Depends(get_llm_manager)
 ):
     """
     Batch analyze multiple contracts for intelligence
@@ -171,11 +174,15 @@ async def batch_analyze_contracts(
         if len(contract_ids) > 10:
             raise HTTPException(status_code=400, detail="Batch size limited to 10 contracts for prototype")
         
+        # Create service
+        intelligence_service = ContractIntelligenceServiceFactory.create_service(llm_mgr)
+        
         # Add background task for each contract
         for contract_id in contract_ids:
             background_tasks.add_task(
                 intelligence_service.analyze_contract_by_id,
                 contract_id,
+                tenant_id,
                 model
             )
         
@@ -199,7 +206,7 @@ async def get_intelligence_dashboard():
     try:
         # Query aggregate intelligence statistics
         query = """
-        MATCH (c:Contract)
+        MATCH (c:Contract {tenant_id: $tenant_id})
         WHERE c.intelligence_status = 'completed'
         RETURN 
             count(c) as total_analyzed,
@@ -210,7 +217,7 @@ async def get_intelligence_dashboard():
             sum(c.redlines_count) as total_redlines
         """
         
-        result = repository.graph.query(query)
+        result = repository.graph.query(query, {"tenant_id": "default-tenant"})
         
         if result:
             stats = result[0]

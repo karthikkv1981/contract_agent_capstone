@@ -66,9 +66,11 @@ def get_pdf_processing_agent(llm):
                 error=f"Analysis failed: {str(e)}"
             )}
     
-    def store_contract_node(state: PDFProcessingState) -> PDFProcessingState:
+    async def store_contract_node(state: PDFProcessingState) -> PDFProcessingState:
         """Store contract - Single Responsibility"""
         contract_data = state.get("contract_data")
+        tenant_id = state.get("tenant_id", "default-tenant")
+        
         if not contract_data:
             return {**state, "processing_result": ProcessingResult(
                 status=ProcessingStatus.ERROR,
@@ -101,10 +103,11 @@ def get_pdf_processing_agent(llm):
                 "total_amount": contract_data.total_amount,
                 "governing_law": contract_data.governing_law,
                 "key_terms": contract_data.key_terms,
-                "full_text": contract_data.full_text
+                "full_text": contract_data.full_text,
+                "tenant_id": tenant_id
             }
             
-            contract_id = contract_repository.store_contract(data_dict)
+            contract_id = await contract_repository.store_contract(data_dict, tenant_id)
             logger.info(f"Contract stored with ID: {contract_id}")
             
             return {**state, "processing_result": ProcessingResult(

@@ -65,12 +65,12 @@ class ContractIntelligenceService:
                 processing_time=time.time() - start_time
             )
     
-    def analyze_contract_by_id(self, contract_id: str, model: str = "gemini-2.5-flash", use_planning: bool = True) -> Optional[ContractIntelligence]:
+    async def analyze_contract_by_id(self, contract_id: str, tenant_id: str = "default-tenant", model: str = "gemini-2.5-flash", use_planning: bool = True) -> Optional[ContractIntelligence]:
         """Analyze contract intelligence for an existing contract by ID"""
         
         try:
             # Get contract text from database
-            contract_data = self.repository.get_contract_by_id(contract_id)
+            contract_data = await self.repository.get_contract_by_id(contract_id, tenant_id)
             
             if not contract_data:
                 logger.error(f"Contract not found: {contract_id}")
@@ -93,7 +93,7 @@ class ContractIntelligenceService:
             intelligence = self.analyze_contract_intelligence(contract_text, model, use_planning)
             
             # Store intelligence results back to database
-            self._store_intelligence_results(contract_id, intelligence)
+            self._store_intelligence_results(contract_id, tenant_id, intelligence)
             
             return intelligence
             
@@ -174,7 +174,7 @@ class ContractIntelligenceService:
         
         return intelligence
     
-    def _store_intelligence_results(self, contract_id: str, intelligence: ContractIntelligence):
+    def _store_intelligence_results(self, contract_id: str, tenant_id: str, intelligence: ContractIntelligence):
         """Store intelligence analysis results in the database"""
         
         try:
@@ -200,7 +200,7 @@ class ContractIntelligenceService:
             
             # Store in Neo4j with CUAD fields
             query = """
-            MATCH (c:Contract {file_id: $contract_id})
+            MATCH (c:Contract {file_id: $contract_id, tenant_id: $tenant_id})
             SET c.risk_score = $risk_score,
                 c.risk_level = $risk_level,
                 c.violations_count = $violations_count,
@@ -222,18 +222,19 @@ class ContractIntelligenceService:
             
             self.repository.graph.query(query, {
                 "contract_id": contract_id,
+                "tenant_id": tenant_id,
                 **intelligence_data
             })
             
             # Store performance metrics
-            self._store_performance_metrics(contract_id, intelligence)
+            self._store_performance_metrics(contract_id, tenant_id, intelligence)
             
             logger.info(f"Stored intelligence results for contract: {contract_id}")
             
         except Exception as e:
             logger.error(f"Failed to store intelligence results for {contract_id}: {e}")
     
-    def _store_performance_metrics(self, contract_id: str, intelligence: ContractIntelligence):
+    def _store_performance_metrics(self, contract_id: str, tenant_id: str, intelligence: ContractIntelligence):
         """Store performance metrics in database"""
         try:
             # Get validation result if available
@@ -244,6 +245,7 @@ class ContractIntelligenceService:
             CREATE (pm:PerformanceMetric {
                 metric_id: randomUUID(),
                 contract_id: $contract_id,
+                tenant_id: $tenant_id,
                 operation: 'cuad_analysis',
                 duration_ms: $duration_ms,
                 success: $success,
@@ -257,6 +259,7 @@ class ContractIntelligenceService:
             
             self.repository.graph.query(metric_query, {
                 "contract_id": contract_id,
+                "tenant_id": tenant_id,
                 "duration_ms": intelligence.processing_time * 1000,
                 "success": True,
                 "validation_score": validation_result.confidence_score if validation_result else 0.0,

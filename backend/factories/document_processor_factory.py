@@ -16,7 +16,7 @@ class IDocumentProcessor(ABC):
     """Interface for document processors"""
     
     @abstractmethod
-    def process_document(self, file_path: str, options: Dict[str, Any]) -> Dict[str, Any]:
+    async def process_document(self, file_path: str, options: Dict[str, Any]) -> Dict[str, Any]:
         """Process document and return results"""
         pass
 
@@ -27,18 +27,19 @@ class BasicDocumentProcessor(IDocumentProcessor):
         self.llm = llm
         self.agent = PDFAgentFactory.create_agent(llm)
     
-    def process_document(self, file_path: str, options: Dict[str, Any]) -> Dict[str, Any]:
+    async def process_document(self, file_path: str, options: Dict[str, Any]) -> Dict[str, Any]:
         """Process document with basic extraction"""
         try:
             state = {
                 "file_path": file_path,
+                "tenant_id": options.get("tenant_id", "default-tenant"),
                 "filename": options.get("filename", ""),
                 "extracted_text": None,
                 "contract_data": None,
                 "processing_result": None
             }
             
-            result = self.agent.invoke(state)
+            result = await self.agent.ainvoke(state)
             
             return {
                 "status": "success",
@@ -64,11 +65,12 @@ class EnhancedDocumentProcessor(IDocumentProcessor):
         self.llm = llm
         self.agent = EnhancedPDFAgentFactory.create_agent(llm, "enhanced")
     
-    def process_document(self, file_path: str, options: Dict[str, Any]) -> Dict[str, Any]:
+    async def process_document(self, file_path: str, options: Dict[str, Any]) -> Dict[str, Any]:
         """Process document with section extraction"""
         try:
             state = {
                 "file_path": file_path,
+                "tenant_id": options.get("tenant_id", "default-tenant"),
                 "filename": options.get("filename", ""),
                 "extracted_text": None,
                 "contract_data": None,
@@ -76,7 +78,7 @@ class EnhancedDocumentProcessor(IDocumentProcessor):
                 "sections": None
             }
             
-            result = self.agent.invoke(state)
+            result = await self.agent.ainvoke(state)
             
             sections = result.get("sections", [])
             
@@ -104,11 +106,12 @@ class FullDocumentProcessor(IDocumentProcessor):
         self.llm = llm
         self.agent = EnhancedPDFAgentFactory.create_agent(llm, "enhanced")
     
-    def process_document(self, file_path: str, options: Dict[str, Any]) -> Dict[str, Any]:
+    async def process_document(self, file_path: str, options: Dict[str, Any]) -> Dict[str, Any]:
         """Process document with full extraction pipeline"""
         try:
             state = {
                 "file_path": file_path,
+                "tenant_id": options.get("tenant_id", "default-tenant"),
                 "filename": options.get("filename", ""),
                 "extracted_text": None,
                 "contract_data": None,
@@ -118,7 +121,7 @@ class FullDocumentProcessor(IDocumentProcessor):
                 "cuad_classifications": None
             }
             
-            result = self.agent.invoke(state)
+            result = await self.agent.ainvoke(state)
             
             sections = result.get("sections", [])
             clauses = result.get("clauses", [])

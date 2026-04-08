@@ -1,8 +1,13 @@
 import logging
 import json
 import contextvars
+import os
 from datetime import datetime
 from typing import Optional
+from dotenv import load_dotenv
+
+# Load environment variables early for logging config
+load_dotenv()
 
 # ContextVar to store the correlation ID for the current async flow
 correlation_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("correlation_id", default="")
@@ -29,11 +34,24 @@ class JsonFormatter(logging.Formatter):
             
         return json.dumps(log_record)
 
-def setup_logging(level: int = logging.INFO):
+def setup_logging(level: Optional[int] = None):
     """
     Configure the root Python logger to use our JSON Formatter.
     This centralized configuration should be called on app startup.
+    Level can be overridden by LOG_LEVEL environment variable.
     """
+    if level is None:
+        # Get level from environment or default to INFO
+        env_level = os.environ.get("LOG_LEVEL", "INFO").upper()
+        level_map = {
+            "DEBUG": logging.DEBUG,
+            "INFO": logging.INFO,
+            "WARNING": logging.WARNING,
+            "ERROR": logging.ERROR,
+            "CRITICAL": logging.CRITICAL
+        }
+        level = level_map.get(env_level, logging.INFO)
+
     handler = logging.StreamHandler()
     handler.setFormatter(JsonFormatter())
     
@@ -41,6 +59,12 @@ def setup_logging(level: int = logging.INFO):
     logging.root.setLevel(level)
     # Remove existing handlers to ensure we only have our JSON formatter
     logging.root.handlers = [handler]
+    
+    # Also silence uvicorn loggers to match the desired level
+    for logger_name in ["uvicorn", "uvicorn.error", "uvicorn.access"]:
+        uv_logger = logging.getLogger(logger_name)
+        uv_logger.setLevel(level)
+        uv_logger.propagate = True # Ensure they propagate to root handler
 
 def get_logger(name: str) -> logging.Logger:
     """

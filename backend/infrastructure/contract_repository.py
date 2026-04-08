@@ -16,7 +16,7 @@ class Neo4jContractRepository(IContractRepository):
         self.graph = graph  # Reuse existing connection
         self.embedding_service = embedding  # Reuse existing embedding service
     
-    def get_contract_by_id(self, contract_id: str, tenant_id: str = "demo_tenant_1") -> Dict[str, Any]:
+    async def get_contract_by_id(self, contract_id: str, tenant_id: str = "default-tenant") -> Dict[str, Any]:
         """Get contract data by ID - Enforces multi-tenant isolation"""
         try:
             query = """
@@ -55,7 +55,7 @@ class Neo4jContractRepository(IContractRepository):
             logger.error(f"Failed to get contract {contract_id}: {e}")
             return None
     
-    async def store_contract(self, contract_data: Dict[str, Any], tenant_id: str) -> str:
+    async def store_contract(self, contract_data: Dict[str, Any], tenant_id: str = "default-tenant") -> str:
         """Store contract in Neo4j with tenant isolation"""
         
         try:
@@ -102,7 +102,7 @@ class Neo4jContractRepository(IContractRepository):
             
             contract_params = {
                 "file_id": contract_id,
-                "tenant_id": contract_data.get("tenant_id", "demo_tenant_1"),
+                "tenant_id": tenant_id,
                 "summary": contract_data.get("summary", ""),
                 "contract_type": contract_data.get("contract_type", "Unknown"),
                 "contract_scope": ", ".join(contract_data.get("key_terms", [])),

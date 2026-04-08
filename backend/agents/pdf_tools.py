@@ -86,7 +86,14 @@ class ContractStorageTool(BaseTool):
         self.repository = Neo4jContractRepository()
     
     def _run(self, contract_data: str) -> str:
-        """Store contract data in Neo4j database"""
+        """Store contract data synchronously (fallback)"""
+        import asyncio
+        import nest_asyncio
+        nest_asyncio.apply()
+        return asyncio.run(self._arun(contract_data))
+
+    async def _arun(self, contract_data: str) -> str:
+        """Store contract data in Neo4j database asynchronously"""
         try:
             logger.info(f"Contract storage tool called with data length: {len(contract_data)}")
             
@@ -110,9 +117,12 @@ class ContractStorageTool(BaseTool):
                 data["full_text"] = ""  # Default empty if not provided
                 logger.info("Added empty full_text field")
             
-            # Use sync storage
-            logger.info("Attempting to store contract in database")
-            contract_id = self.repository.store_contract(data)
+            # Get tenant_id from data or default
+            tenant_id = data.get("tenant_id", "default-tenant")
+            
+            # Use async storage
+            logger.info(f"Attempting to store contract in database for tenant: {tenant_id}")
+            contract_id = await self.repository.store_contract(data, tenant_id)
             
             logger.info(f"Successfully stored contract: {contract_id}")
             return f"SUCCESS: Contract stored with ID: {contract_id}"

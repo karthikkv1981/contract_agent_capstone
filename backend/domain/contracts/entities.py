@@ -31,7 +31,7 @@ class IContractAnalyzer(ABC):
 
 class IContractRepository(ABC):
     @abstractmethod
-    async def store_contract(self, contract_data: Dict[str, Any]) -> str:
+    async def store_contract(self, contract_data: Dict[str, Any], tenant_id: str) -> str:
         pass
 
 class IDocumentProcessor(ABC):

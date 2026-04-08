@@ -22,7 +22,7 @@ class DocumentProcessingService:
         self.embedding_orchestrator = EmbeddingOrchestrator()
         self.embedding_validator = EmbeddingValidator()
     
-    def process_pdf_upload(self, request: DocumentProcessingRequest) -> dict:
+    async def process_pdf_upload(self, request: DocumentProcessingRequest) -> dict:
         """
         Process uploaded PDF using agent-based workflow with structured output
         """
@@ -42,7 +42,7 @@ class DocumentProcessingService:
             pdf_agent = self.pdf_agent_factory.create_agent(llm)
             
             # 4. Process document using agent with structured state
-            result = self._process_with_agent(pdf_agent, request)
+            result = await self._process_with_agent(pdf_agent, request)
             
             # 5. Clean up temporary file
             self._cleanup_file(request.file_path)
@@ -76,7 +76,7 @@ class DocumentProcessingService:
         else:
             raise ValueError(f"Unknown model: {model_name}")
     
-    def _process_with_agent(self, pdf_agent, request: DocumentProcessingRequest) -> dict:
+    async def _process_with_agent(self, pdf_agent, request: DocumentProcessingRequest) -> dict:
         """Process document using PDF agent with structured output"""
         
         # Start workflow tracking
@@ -92,6 +92,7 @@ class DocumentProcessingService:
         # Create initial state
         initial_state = {
             "file_path": request.file_path,
+            "tenant_id": request.tenant_id or "default-tenant",
             "extracted_text": None,
             "contract_data": None,
             "processing_result": None,
@@ -102,7 +103,7 @@ class DocumentProcessingService:
         
         try:
             # Run the agent workflow
-            final_state = pdf_agent.invoke(initial_state)
+            final_state = await pdf_agent.ainvoke(initial_state)
             processing_result = final_state.get("processing_result")
             
             if not processing_result:
