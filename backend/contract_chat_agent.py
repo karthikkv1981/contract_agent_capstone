@@ -24,7 +24,30 @@ def get_agent(llm):
 
     # Node
     def assistant(state: MessagesState):
-        return {"messages": [llm_with_tools.invoke([sys_msg] + state["messages"])]}
+        response = llm_with_tools.invoke([sys_msg] + state["messages"])
+        
+        # Log model decision
+        from backend.infrastructure.agent_audit_service import AgentAuditService
+        from backend.shared.utils.logger import correlation_id_var
+        
+        audit_service = AgentAuditService()
+        session_id = correlation_id_var.get() or "unknown_session"
+        
+        # Log textual rationale if present
+        if response.content:
+            audit_service.log_model_decision(
+                rationale=response.content[:500],
+                session_id=session_id,
+                metadata={"has_tool_calls": bool(response.tool_calls)}
+            )
+        elif response.tool_calls:
+            audit_service.log_model_decision(
+                rationale="Agent decided to call tools.",
+                session_id=session_id,
+                metadata={"tool_names": [tc['name'] for tc in response.tool_calls]}
+            )
+            
+        return {"messages": [response]}
 
     # Simple tool execution function (replaces ToolNode)
     def execute_tools(state: MessagesState):
@@ -36,17 +59,46 @@ def get_agent(llm):
         if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
             # Execute tools manually
             tool_messages = []
+            # Execute tools manually
+            tool_messages = []
+            from backend.infrastructure.agent_audit_service import AgentAuditService
+            from backend.shared.utils.logger import correlation_id_var
+            
+            audit_service = AgentAuditService()
+            session_id = correlation_id_var.get() or "unknown_session"
+
             for tool_call in last_message.tool_calls:
                 # Find and execute the tool
                 for tool in tools:
                     if tool.name == tool_call['name']:
-                        result = tool.invoke(tool_call['args'])
-                        # Create proper ToolMessage
-                        tool_message = ToolMessage(
-                            content=str(result),
-                            tool_call_id=tool_call['id']
-                        )
-                        tool_messages.append(tool_message)
+                        try:
+                            result = tool.invoke(tool_call['args'])
+                            
+                            # Log tool execution
+                            audit_service.log_tool_execution(
+                                tool_name=tool.name,
+                                args=tool_call['args'],
+                                result=str(result),
+                                session_id=session_id,
+                                status="success"
+                            )
+                            
+                            # Create proper ToolMessage
+                            tool_message = ToolMessage(
+                                content=str(result),
+                                tool_call_id=tool_call['id']
+                            )
+                            tool_messages.append(tool_message)
+                        except Exception as e:
+                            # Log tool failure
+                            audit_service.log_tool_execution(
+                                tool_name=tool.name,
+                                args=tool_call['args'],
+                                result=str(e),
+                                session_id=session_id,
+                                status="failure"
+                            )
+                            raise
             return {"messages": tool_messages}
         return {"messages": []}
 

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends, Request
+from backend.governance.rbac import Permission, requires_permission
 from pydantic import BaseModel
 from typing import Dict, List, Any, Optional
 from datetime import datetime
@@ -26,7 +27,7 @@ class FeedbackResponse(BaseModel):
     status: str
     message: str
 
-@router.post("/legal-decision", response_model=FeedbackResponse)
+@router.post("/legal-decision", response_model=FeedbackResponse, dependencies=[Depends(requires_permission(Permission.ANALYZE))])
 async def submit_legal_decision(request: LegalDecisionRequest):
     """Submit legal team decision for learning"""
     try:
@@ -60,7 +61,7 @@ async def submit_legal_decision(request: LegalDecisionRequest):
         logger.error(f"Failed to submit legal decision: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to record decision: {str(e)}")
 
-@router.get("/decisions/{contract_id}")
+@router.get("/decisions/{contract_id}", dependencies=[Depends(requires_permission(Permission.VIEW_REPORTS))])
 async def get_contract_decisions(contract_id: str):
     """Get all legal decisions for a contract"""
     try:
@@ -101,7 +102,7 @@ async def get_contract_decisions(contract_id: str):
         logger.error(f"Failed to get decisions for contract {contract_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to retrieve decisions: {str(e)}")
 
-@router.get("/patterns/{clause_type}")
+@router.get("/patterns/{clause_type}", dependencies=[Depends(requires_permission(Permission.VIEW_REPORTS))])
 async def get_learned_patterns(clause_type: str):
     """Get learned patterns for a clause type"""
     try:
@@ -132,7 +133,7 @@ async def get_learned_patterns(clause_type: str):
         logger.error(f"Failed to get patterns for clause type {clause_type}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to retrieve patterns: {str(e)}")
 
-@router.post("/retrain/{clause_type}")
+@router.post("/retrain/{clause_type}", dependencies=[Depends(requires_permission(Permission.MANAGE_POLICIES))])
 async def retrain_patterns(clause_type: str):
     """Retrain patterns for a specific clause type"""
     try:
@@ -156,7 +157,7 @@ async def retrain_patterns(clause_type: str):
         logger.error(f"Failed to retrain patterns for {clause_type}: {e}")
         raise HTTPException(status_code=500, detail=f"Retraining failed: {str(e)}")
 
-@router.get("/analytics/dashboard")
+@router.get("/analytics/dashboard", dependencies=[Depends(requires_permission(Permission.VIEW_REPORTS))])
 async def get_feedback_analytics():
     """Get feedback analytics for dashboard"""
     try:
@@ -205,7 +206,7 @@ async def get_feedback_analytics():
         logger.error(f"Failed to get feedback analytics: {e}")
         raise HTTPException(status_code=500, detail=f"Analytics failed: {str(e)}")
 
-@router.post("/bulk-feedback")
+@router.post("/bulk-feedback", dependencies=[Depends(requires_permission(Permission.ANALYZE))])
 async def submit_bulk_feedback(decisions: List[LegalDecisionRequest]):
     """Submit multiple legal decisions at once"""
     try:

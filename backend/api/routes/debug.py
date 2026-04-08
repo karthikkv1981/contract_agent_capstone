@@ -1,4 +1,5 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from backend.governance.rbac import Permission, requires_permission
 from backend.infrastructure.contract_repository import Neo4jContractRepository
 import logging
 import os
@@ -12,7 +13,7 @@ def create_debug_router() -> APIRouter:
     if os.getenv("ENVIRONMENT", "development") != "production":
         router = APIRouter(prefix="/debug", tags=["debug"])
         
-        @router.get("/contracts")
+        @router.get("/contracts", dependencies=[Depends(requires_permission(Permission.VIEW_AUDIT))])
         async def list_all_contracts():
             """Debug endpoint to see all contracts in database"""
             try:
@@ -47,7 +48,7 @@ def create_debug_router() -> APIRouter:
                 logger.error(f"Debug contracts failed: {e}")
                 return {"error": str(e)}
 
-        @router.get("/contract-types")
+        @router.get("/contract-types", dependencies=[Depends(requires_permission(Permission.VIEW_REPORTS))])
         async def get_contract_type_counts():
             """Debug endpoint to see contract type distribution"""
             try:

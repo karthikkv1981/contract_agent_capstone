@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from backend.governance.rbac import Permission, requires_permission
 from typing import List, Optional
 from pydantic import BaseModel, Field
 from backend.domain.search_entities import SearchLevel, SearchParams
@@ -48,15 +49,15 @@ class EnhancedSearchRequest(BaseModel):
 # Initialize the enhanced search service
 search_service = EnhancedSearchService()
 
-@router.post("/search/enhanced")
+@router.post("/search/enhanced", dependencies=[Depends(requires_permission(Permission.ANALYZE))])
 async def enhanced_contract_search(request: EnhancedSearchRequest):
     """Enhanced contract search with multi-level embedding support"""
     try:
-        print("\n=== ENHANCED SEARCH DEBUG ===", flush=True)
-        print(f"Search Level: {request.search_level}", flush=True)
-        print(f"Query: {request.query}", flush=True)
-        print(f"Contract Type: {request.contract_type}", flush=True)
-        print(f"Active: {request.active}", flush=True)
+        logger.info("\n=== ENHANCED SEARCH ===")
+        logger.info(f"Search Level: {request.search_level}")
+        logger.info(f"Query: {request.query}")
+        logger.info(f"Contract Type: {request.contract_type}")
+        logger.info(f"Active: {request.active}")
         
         # Convert request to search params
         search_params = SearchParams(
@@ -76,27 +77,27 @@ async def enhanced_contract_search(request: EnhancedSearchRequest):
         # Execute search using service
         result = search_service.search(search_params)
         
-        print(f"Raw Search Result:", flush=True)
-        print(f"  Total Count: {result.total_count}", flush=True)
-        print(f"  Items Length: {len(result.items)}", flush=True)
-        print(f"  First Item: {result.items[0] if result.items else 'None'}", flush=True)
-        print(f"  Metadata: {result.search_metadata}", flush=True)
+        logger.info(f"Raw Search Result:")
+        logger.info(f"  Total Count: {result.total_count}")
+        logger.info(f"  Items Length: {len(result.items)}")
+        logger.info(f"  First Item: {result.items[0] if result.items else 'None'}")
+        logger.info(f"  Metadata: {result.search_metadata}")
         
         # Map to API response
         response = SearchResponseMapper.to_api_response(result, request.search_level.value)
         
-        print(f"Final API Response:", flush=True)
-        print(f"  Success: {response['success']}", flush=True)
-        print(f"  Contracts Found: {response['contracts_found']}", flush=True)
-        print(f"  Results Length: {len(response['results'])}", flush=True)
-        print(f"=== END DEBUG ===\n", flush=True)
+        logger.info(f"Final API Response:")
+        logger.info(f"  Success: {response['success']}")
+        logger.info(f"  Contracts Found: {response['contracts_found']}")
+        logger.info(f"  Results Length: {len(response['results'])}")
+        logger.info(f"=== END SEARCH ===\n")
         
         return response
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
 
-@router.post("/search/clauses")
+@router.post("/search/clauses", dependencies=[Depends(requires_permission(Permission.ANALYZE))])
 async def search_clauses(request: ClauseSearchRequest):
     """Search contracts by specific clause types"""
     try:
@@ -112,7 +113,7 @@ async def search_clauses(request: ClauseSearchRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Clause search failed: {str(e)}")
 
-@router.post("/search/sections")
+@router.post("/search/sections", dependencies=[Depends(requires_permission(Permission.ANALYZE))])
 async def search_sections(request: SectionSearchRequest):
     """Search contracts by document sections"""
     try:
@@ -128,7 +129,7 @@ async def search_sections(request: SectionSearchRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Section search failed: {str(e)}")
 
-@router.post("/search/relationships")
+@router.post("/search/relationships", dependencies=[Depends(requires_permission(Permission.ANALYZE))])
 async def search_relationships(request: RelationshipSearchRequest):
     """Search contracts by party relationships"""
     try:

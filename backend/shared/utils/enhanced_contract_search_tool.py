@@ -5,6 +5,9 @@ from langchain_core.tools import BaseTool
 from backend.shared.utils.gemini_embedding_service import embedding
 from langchain_neo4j import Neo4jGraph
 from pydantic import BaseModel, Field
+from backend.shared.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 load_dotenv()
 
@@ -38,6 +41,7 @@ graph: Neo4jGraph = Neo4jGraph(
 
 def get_contracts_multi_level(
     embeddings: Any,
+    tenant_id: str,
     search_level: SearchLevel = SearchLevel.DOCUMENT,
     clause_types: Optional[List[str]] = None,
     section_types: Optional[List[str]] = None,
@@ -53,39 +57,39 @@ def get_contracts_multi_level(
     monetary_value: Optional[MonetaryValue] = None,
     governing_law: Optional[Location] = None
 ):
-    """Enhanced contract search with multi-level embedding support"""
+    """Enhanced contract search with multi-level embedding support and tenant isolation"""
     
-    params: dict[str, Any] = {}
-    filters: list[str] = []
+    params: dict[str, Any] = {"tenant_id": tenant_id}
+    filters: list[str] = ["c.tenant_id = $tenant_id"]
     
     if search_level == SearchLevel.DOCUMENT:
-        return _search_documents(embeddings, summary_search, filters, params, 
+        return _search_documents(embeddings, tenant_id, summary_search, filters, params, 
                                min_effective_date, max_effective_date, min_end_date, max_end_date,
                                contract_type, parties, active, cypher_aggregation, monetary_value, governing_law)
     
     elif search_level == SearchLevel.SECTION:
-        return _search_sections(embeddings, summary_search, section_types, filters, params)
+        return _search_sections(embeddings, tenant_id, summary_search, section_types, filters, params)
     
     elif search_level == SearchLevel.CLAUSE:
-        return _search_clauses(embeddings, summary_search, clause_types, filters, params)
+        return _search_clauses(embeddings, tenant_id, summary_search, clause_types, filters, params)
     
     elif search_level == SearchLevel.RELATIONSHIP:
-        return _search_relationships(embeddings, summary_search, parties, filters, params)
+        return _search_relationships(embeddings, tenant_id, summary_search, parties, filters, params)
     
     elif search_level == SearchLevel.CHUNK:
-        return _search_chunks(embeddings, summary_search, filters, params)
+        return _search_chunks(embeddings, tenant_id, summary_search, filters, params)
     
     elif search_level == SearchLevel.ALL:
-        return _search_all_levels(embeddings, summary_search, clause_types, section_types, 
-                                filters, params)
+        return _search_all_levels(embeddings, tenant_id, summary_search, clause_types, section_types, 
+                                 filters, params)
 
-def _search_documents(embeddings, summary_search, filters, params, 
+def _search_documents(embeddings, tenant_id, summary_search, filters, params, 
                      min_effective_date, max_effective_date, min_end_date, max_end_date,
                      contract_type, parties, active, cypher_aggregation, monetary_value, governing_law):
-    """Search at document level using existing logic"""
+    """Search at document level using existing logic with tenant isolation"""
     cypher_statement = "MATCH (c:Contract) "
     
-    # Apply existing filters (reuse existing logic)
+    # Apply existing filters (already includes tenant_id filter from get_contracts_multi_level)
     if governing_law and governing_law.country:
         filters.append("""EXISTS {
             MATCH (c)-[:HAS_GOVERNING_LAW]->(country)
@@ -139,9 +143,12 @@ def _search_documents(embeddings, summary_search, filters, params,
     output = graph.query(cypher_statement, params)
     return [convert_neo4j_date(el) for el in output]
 
-def _search_sections(embeddings, summary_search, section_types, filters, params):
-    """Search at section level"""
+def _search_sections(embeddings, tenant_id, summary_search, section_types, filters, params):
+    """Search at section level with tenant isolation"""
     cypher_statement = "MATCH (c:Contract)-[:HAS_SECTION]->(s:Section) "
+    
+    # Add tenant filtering (Contract node has tenant_id)
+    filters.append("c.tenant_id = $tenant_id")
     
     if section_types:
         filters.append("s.section_type IN $section_types")
@@ -178,9 +185,12 @@ def _search_sections(embeddings, summary_search, section_types, filters, params)
     output = graph.query(cypher_statement, params)
     return [convert_neo4j_date(el) for el in output]
 
-def _search_clauses(embeddings, summary_search, clause_types, filters, params):
-    """Search at clause level"""
+def _search_clauses(embeddings, tenant_id, summary_search, clause_types, filters, params):
+    """Search at clause level with tenant isolation"""
     cypher_statement = "MATCH (c:Contract)-[:CONTAINS_CLAUSE]->(cl:Clause) "
+    
+    # Add tenant filtering
+    filters.append("c.tenant_id = $tenant_id")
     
     if clause_types:
         filters.append("cl.clause_type IN $clause_types")
@@ -219,9 +229,12 @@ def _search_clauses(embeddings, summary_search, clause_types, filters, params):
     output = graph.query(cypher_statement, params)
     return [convert_neo4j_date(el) for el in output]
 
-def _search_relationships(embeddings, summary_search, parties, filters, params):
-    """Search at relationship level"""
+def _search_relationships(embeddings, tenant_id, summary_search, parties, filters, params):
+    """Search at relationship level with tenant isolation"""
     cypher_statement = "MATCH (c:Contract)<-[r:PARTY_TO]-(p:Party) "
+    
+    # Add tenant filtering
+    filters.append("c.tenant_id = $tenant_id")
     
     if parties:
         filters.append("p.name IN $parties")
@@ -255,16 +268,16 @@ def _search_relationships(embeddings, summary_search, parties, filters, params):
     output = graph.query(cypher_statement, params)
     return [convert_neo4j_date(el) for el in output]
 
-def _search_chunks(embeddings, summary_search, filters, params):
-    """Enhanced search at chunk level with semantic capabilities"""
+def _search_chunks(embeddings, tenant_id, summary_search, filters, params):
+    """Enhanced search at chunk level with semantic capabilities and tenant isolation"""
     
     # Try semantic search first if available
     if summary_search:
         try:
-            # Check for new Chunk nodes with embeddings
+            # Check for new Chunk nodes with embeddings, including tenant filtering
             semantic_query = """
             MATCH (d:Document)-[:HAS_CHUNK]->(c:Chunk)
-            WHERE c.embedding IS NOT NULL
+            WHERE c.embedding IS NOT NULL AND d.tenant_id = $tenant_id
             WITH c, d, vector.similarity.cosine(c.embedding, $chunk_embedding) AS chunk_score
             WHERE chunk_score > 0.7
             RETURN {
@@ -283,18 +296,18 @@ def _search_chunks(embeddings, summary_search, filters, params):
             """
             
             chunk_embedding = embeddings.embed_query(summary_search)
-            semantic_params = {"chunk_embedding": chunk_embedding}
+            semantic_params = {"chunk_embedding": chunk_embedding, "tenant_id": tenant_id}
             
             semantic_output = graph.query(semantic_query, semantic_params)
             if semantic_output and semantic_output[0]['result']['total_count'] > 0:
                 return [convert_neo4j_date(el) for el in semantic_output]
         except Exception as e:
-            print(f"Semantic chunk search failed, falling back to text search: {e}")
+            logger.error(f"Semantic chunk search failed, falling back to text search: {e}")
     
-    # Fallback to text search across both new and legacy chunks
+    # Fallback to text search across both new and legacy chunks, enforcing tenant_id
     cypher_statement = """
     MATCH (d:Document)-[:HAS_CHUNK]->(c:Chunk)
-    WHERE c.content CONTAINS $search_text
+    WHERE c.content CONTAINS $search_text AND d.tenant_id = $tenant_id
     RETURN {
         total_count: count(c),
         chunks: collect({
@@ -310,7 +323,7 @@ def _search_chunks(embeddings, summary_search, filters, params):
     UNION
     
     MATCH (c:Contract)-[:CONTAINS_CHUNK]->(dc:DocumentChunk)
-    WHERE dc.content CONTAINS $search_text
+    WHERE dc.content CONTAINS $search_text AND c.tenant_id = $tenant_id
     RETURN {
         total_count: count(dc),
         chunks: collect({
@@ -327,9 +340,10 @@ def _search_chunks(embeddings, summary_search, filters, params):
     if summary_search:
         params["search_text"] = summary_search
     else:
-        # If no search text, return recent chunks
+        # If no search text, return recent chunks for current tenant
         cypher_statement = """
         MATCH (d:Document)-[:HAS_CHUNK]->(c:Chunk)
+        WHERE d.tenant_id = $tenant_id
         RETURN {
             total_count: count(c),
             chunks: collect({
@@ -347,14 +361,14 @@ def _search_chunks(embeddings, summary_search, filters, params):
     output = graph.query(cypher_statement, params)
     return [convert_neo4j_date(el) for el in output]
 
-def _search_all_levels(embeddings, summary_search, clause_types, section_types, filters, params):
-    """Search across all levels and combine results"""
+def _search_all_levels(embeddings, tenant_id, summary_search, clause_types, section_types, filters, params):
+    """Search across all levels and combine results with tenant isolation"""
     results = {
-        "documents": _search_documents(embeddings, summary_search, [], {}, None, None, None, None, None, None, None, None, None, None),
-        "sections": _search_sections(embeddings, summary_search, section_types, [], {}),
-        "clauses": _search_clauses(embeddings, summary_search, clause_types, [], {}),
-        "relationships": _search_relationships(embeddings, summary_search, None, [], {}),
-        "chunks": _search_chunks(embeddings, summary_search, [], {})
+        "documents": _search_documents(embeddings, tenant_id, summary_search, ["c.tenant_id = $tenant_id"], {"tenant_id": tenant_id}, None, None, None, None, None, None, None, None, None, None),
+        "sections": _search_sections(embeddings, tenant_id, summary_search, section_types, ["c.tenant_id = $tenant_id"], {"tenant_id": tenant_id}),
+        "clauses": _search_clauses(embeddings, tenant_id, summary_search, clause_types, ["c.tenant_id = $tenant_id"], {"tenant_id": tenant_id}),
+        "relationships": _search_relationships(embeddings, tenant_id, summary_search, None, ["c.tenant_id = $tenant_id"], {"tenant_id": tenant_id}),
+        "chunks": _search_chunks(embeddings, tenant_id, summary_search, ["c.tenant_id = $tenant_id"], {"tenant_id": tenant_id})
     }
     return [results]
 
@@ -375,6 +389,7 @@ class EnhancedContractInput(BaseModel):
     governing_law: Optional[Location] = Field(None, description="Governing law of the contract")
     monetary_value: Optional[MonetaryValue] = Field(None, description="The total amount or value of a contract")
     cypher_aggregation: Optional[str] = Field(None, description="Custom Cypher statement for advanced aggregations")
+    tenant_id: str = Field(..., description="The ID of the tenant requesting the search")
 
 class EnhancedContractSearchTool(BaseTool):
     name: str = "EnhancedContractSearch"
@@ -386,6 +401,7 @@ class EnhancedContractSearchTool(BaseTool):
 
     def _run(
         self,
+        tenant_id: str,
         search_level: SearchLevel = SearchLevel.DOCUMENT,
         clause_types: Optional[List[str]] = None,
         section_types: Optional[List[str]] = None,
@@ -404,6 +420,7 @@ class EnhancedContractSearchTool(BaseTool):
         """Use the enhanced search tool"""
         return get_contracts_multi_level(
             embedding,
+            tenant_id,
             search_level,
             clause_types,
             section_types,
